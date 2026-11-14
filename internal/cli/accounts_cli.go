@@ -31,7 +31,7 @@ func accountsCmd(args []string) error {
 	if len(args) > 1 && args[1] == "discovery" {
 		return accountsDiscoveryCmd(args[2:])
 	}
-	const usage = "usage: magpie accounts [claude|codex|grok|copilot|gemini|antigravity|zed|factory|mimo|<plugin>] [--json] | magpie accounts add <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> | magpie accounts add copilot [--host <name>.ghe.com] | magpie accounts import <codex|claude|antigravity|factory|<plugin>> <file>... [--yes] | magpie accounts import codex <file>... --access-only [--yes] | magpie accounts access-only codex <email> [on|off] | magpie accounts refresh [--json] | magpie accounts checkin [--json] | magpie accounts switch|forget <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> <email> | magpie accounts switch <claude|codex> next | magpie accounts switch|forget copilot <login>[@<name>.ghe.com] [--host <name>.ghe.com] | magpie accounts project <gemini|antigravity> <email> <gcp-project-id> | magpie accounts alias <agent|<plugin>> <email> [<name>|--clear] | magpie accounts switch-only <codex|claude> [on|off]"
+	const usage = "usage: magpie accounts [claude|codex|grok|copilot|gemini|antigravity|zed|factory|mimo|<plugin>] [--json] | magpie accounts add <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> | magpie accounts add copilot [--host <name>.ghe.com] | magpie accounts import <codex|claude|antigravity|factory|<plugin>> <file>... [--yes] | magpie accounts import codex <file>... --access-only [--yes] | magpie accounts access-only codex <email> [on|off] | magpie accounts refresh [--json] | magpie accounts checkin [--json] | magpie accounts switch|forget <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> <email> | magpie accounts switch <claude|codex> next | magpie accounts switch|forget copilot <login>[@<name>.ghe.com] [--host <name>.ghe.com] | magpie accounts project <gemini|antigravity> <email> <gcp-project-id> | magpie accounts alias <agent|<plugin>> <email> [<name>|--clear] | magpie accounts switch-only <codex|claude> [on|off] | magpie accounts stand-in codex [on|off]"
 	agentID := func(s string) (string, error) {
 		switch strings.ToLower(s) {
 		case "claude", "cc":
@@ -116,6 +116,9 @@ func accountsCmd(args []string) error {
 	}
 	if len(args) > 1 && args[1] == "switch-only" {
 		return switchOnlyCmd(args[2:])
+	}
+	if len(args) > 1 && args[1] == "stand-in" {
+		return standInCmd(args[2:])
 	}
 	if len(args) > 1 && args[1] == "import" {
 		return importAccounts(args[2:])
@@ -370,7 +373,7 @@ func accountRows(ls []provider.Login, now time.Time) []accountRow {
 	wg.Wait()
 	rows := []accountRow{}
 	for _, l := range ls {
-		r := accountRow{Agent: l.Agent, User: l.User, Plan: l.Plan, Active: l.Active, On: l.On, Windows: []quotaSpan{}, Lapsed: l.Lapsed}
+		r := accountRow{Agent: l.Agent, User: l.User, Plan: l.Plan, Active: l.Active || l.StandIn, On: l.On, Windows: []quotaSpan{}, Lapsed: l.Lapsed}
 		r.Seat = provider.SeatNameOf(l.Agent, l.User)
 		r.Alias = cmp.Or(provider.AccountLabelOf(l.Agent, l.User), r.Seat)
 		for user, q := range usage[l.Agent] {
@@ -1129,6 +1132,44 @@ func switchOnlyCmd(args []string) error {
 		fmt.Println(green.Render("✓"), "magpie only switches Claude Code's sign-in to an account with room; it serves no requests on the Claude accounts. A Claude Code session already open stays on its account until it is started again.")
 	default:
 		fmt.Println(green.Render("✓"), "magpie serves requests on the Claude accounts that are on again")
+	}
+	return nil
+}
+
+// standInCmd is `magpie accounts stand-in codex [on|off]`: a saved ChatGPT
+// account stands in for Codex's own sign-in while Codex is signed out of
+// one, with the accounts ticked served beside it (codexStandIn), or Codex
+// is listed only while it is signed in itself. With no on or off it says
+// which it is.
+func standInCmd(args []string) error {
+	const usage = "usage: magpie accounts stand-in codex [on|off]"
+	if len(args) < 1 || len(args) > 2 || strings.ToLower(args[0]) != "codex" {
+		return fmt.Errorf("%s", usage)
+	}
+	if len(args) == 1 {
+		if provider.SavedStandIn() {
+			fmt.Println("on · a saved ChatGPT account stands in for Codex's own sign-in while Codex is signed out of one, with the accounts ticked served beside it")
+		} else {
+			fmt.Println("off · Codex is listed only while it is signed in to a ChatGPT account itself")
+		}
+		return nil
+	}
+	var on bool
+	switch strings.ToLower(args[1]) {
+	case "on":
+		on = true
+	case "off":
+	default:
+		return fmt.Errorf("%s", usage)
+	}
+	if err := provider.SetSavedStandIn("codex", on); err != nil {
+		return err
+	}
+	agent.SyncCatalog()
+	if on {
+		fmt.Println(green.Render("✓"), "a saved ChatGPT account stands in for Codex's own sign-in while Codex is signed out of one, as when it is signed in; the accounts ticked are served beside it")
+	} else {
+		fmt.Println(green.Render("✓"), "Codex is listed only while it is signed in to a ChatGPT account itself; its saved accounts wait for it")
 	}
 	return nil
 }

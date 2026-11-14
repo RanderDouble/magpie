@@ -499,6 +499,14 @@ func RetryCodexKeychain() error {
 	return err
 }
 
+// codexUnread: Codex's sign-in is kept where magpie couldn't read it, so
+// nothing is known of it: never signed out, and no saved account stands
+// in for one it may be holding.
+func codexUnread(err error) bool {
+	var se *codexStoreError
+	return errors.As(err, &se) || codexKeychainUnread(err)
+}
+
 // codexKeychainUnread: Codex's sign-in is kept in the keychain item, and
 // the keychain didn't give it (refused, no answer, waiting): Try again
 // can help.

@@ -6602,6 +6602,9 @@ function renderExcluded() {
       rm.onclick = () => askForgetSaved(x);
       r.lastChild.append(x.retry ? " · " : " ", rm);
     }
+    // the stand-in's tick is drawn with Codex's own accounts, which with
+    // it off are out of the list: this line is the way back on
+    if (x.agent === "codex" && x.signedOut) import("./savedstandin.js").then(() => savedStandInLink(x, r));
     box.append(r);
   }
 }
@@ -13723,6 +13726,8 @@ function renderAccounts(a, p) {
     cb.onchange = () => accountAction("provider/restartapp", { id: p.id, restartApp: cb.checked }, t(cb.checked ? "magpie restarts the {agent} app when it switches accounts back" : "magpie leaves the {agent} app running when it switches accounts back", ag));
     list.append(el("div", "restart-app", re));
   }
+  // the saved ChatGPT accounts standing in while Codex is signed out
+  if (p && cx) import("./savedstandin.js").then(() => savedStandInRow(p, list));
   // how a pool ends at its caps (plugins#349)
   const capped = (l) => accountCapOf(p, l.user) || windowCapsOf(p, l.user);
   if (p && (ls.some(capped) || p.capStop || p.capCareful)) {

@@ -538,7 +538,7 @@ func CodexUsedUp(ctx context.Context) bool {
 	// signed in to counts (codexReadingHeld), so only it is read
 	var active []string
 	for _, l := range Logins("codex") {
-		if l.Active {
+		if l.Active || l.first {
 			active = append(active, l.User)
 		}
 	}
@@ -565,7 +565,7 @@ func codexHoldReading(ctx context.Context) map[string]SubscriptionQuota {
 		return nil
 	}
 	for _, l := range Logins("codex") {
-		if l.Active {
+		if l.Active || l.first {
 			return map[string]SubscriptionQuota{l.User: loginReading(ctx, l).q}
 		}
 	}
@@ -593,7 +593,7 @@ func CodexUsedUpKnown() bool {
 // reading, not codexHeld, which is what one vendor reply says.
 func codexReadingHeld(u map[string]SubscriptionQuota) bool {
 	for _, l := range Logins("codex") {
-		if q, ok := u[l.User]; l.Active && ok && q.Error == "" && q.Held {
+		if q, ok := u[l.User]; (l.Active || l.first) && ok && q.Error == "" && q.Held {
 			return true
 		}
 	}

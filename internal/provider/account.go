@@ -919,6 +919,17 @@ func refreshFailed(status int, agent, msg string) error {
 	return fmt.Errorf("%s token refresh failed (HTTP %d)", agent, status)
 }
 
+// codexRefreshRefusal is a refresh ChatGPT turned down, with the code its
+// answer carries (codexRefreshCode): refresh_token_reused says another
+// copy of the sign-in refreshed it first, refresh_token_expired that the
+// token is too old.
+type codexRefreshRefusal struct {
+	error
+	Code string
+}
+
+func (e codexRefreshRefusal) Unwrap() error { return e.error }
+
 // Accounts lists the signed-in agents as providers.
 func Accounts() []Provider {
 	if settings.AccountDiscoveryOff() {
@@ -1068,9 +1079,16 @@ func codexAccount(home string) (Provider, bool) {
 	// where Codex's config.toml keeps it: auth.json, or the macOS
 	// keychain item (#2367)
 	b, _, err := readCodexLogin(dir, false)
+	if codexUnread(err) {
+		// a sign-in magpie can't read (a keychain item it may not open,
+		// a store it doesn't read here) is unknown, not signed out
+		return Provider{}, false
+	}
 	var a codexAuth
 	if err != nil || json.Unmarshal(b, &a) != nil || a.Tokens.AccessToken == "" || a.AuthMode == "apikey" {
-		return Provider{}, false
+		// nothing signed in here: a saved account stands in, as a saved
+		// Claude account does while Claude Code is signed out
+		return codexStandInAccount()
 	}
 	id := jwtClaims(a.Tokens.IDToken)
 	acct := &Account{Agent: "codex", Stream: true,
@@ -1307,6 +1325,11 @@ func codexRefresh(ctx context.Context, raw map[string]any, reason string) (strin
 	}
 	if res.StatusCode != 200 || json.Unmarshal(b, &fresh) != nil || fresh.AccessToken == "" {
 		err := refreshFailed(res.StatusCode, "Codex", "Codex is signed out (token refresh failed); sign in to this account again")
+		if res.StatusCode != 200 {
+			// the code the answer carries, which says whether the token was
+			// spent elsewhere (refresh_token_reused) or is too old
+			err = codexRefreshRefusal{error: err, Code: codexRefreshCode(b)}
+		}
 		if res.StatusCode != 200 && codexRefreshGone(res.StatusCode, b) {
 			// refused for good, by Codex's own rule (#4308)
 			err = codexRefreshGoneError{err}

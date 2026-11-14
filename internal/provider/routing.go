@@ -221,6 +221,52 @@ func SetRestartApp(id string, on bool) error {
 	return Save(*p)
 }
 
+// SetSavedStandIn lets a saved ChatGPT account stand in for Codex's own
+// sign-in while Codex is signed out (Provider.NoSavedStandIn off), or
+// leaves Codex unlisted then: it is listed only while it is signed in
+// itself. providers.json's entry is written here, not through Save: with
+// the stand-in off and Codex signed out, that entry is the account's picks
+// alone, which Save takes for a provider of the user's and refuses for
+// having no base URL — the one state the toggle has to be turned back on
+// from.
+func SetSavedStandIn(id string, on bool) error {
+	if id != "codex" {
+		return fmt.Errorf("magpie serves no saved account in %s's place", id)
+	}
+	f, err := read()
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(f.Providers, func(p Provider) bool { return p.ID == id })
+	switch {
+	case i >= 0 && f.Providers[i].NoSavedStandIn == !on:
+		return nil
+	case i >= 0:
+		f.Providers[i].NoSavedStandIn = !on
+	case on:
+		return nil // nothing saved to say it on
+	default:
+		// the entry keeps the choice once Codex is signed in and the
+		// account's settings are saved beside it
+		f.Providers = append(f.Providers, Provider{ID: id, NoSavedStandIn: true})
+	}
+	return store(f)
+}
+
+// SavedStandIn reports whether a saved ChatGPT account may stand in for
+// Codex's own sign-in while Codex is signed out of one
+// (Provider.NoSavedStandIn). While providers.json can't be read the
+// user's choice is unknown, and one stands in: it is what magpie does
+// unless told otherwise.
+func SavedStandIn() bool {
+	for _, p := range storedFile().Providers {
+		if p.ID == "codex" {
+			return !p.NoSavedStandIn
+		}
+	}
+	return true
+}
+
 // codexRestartsApp is whether the user had magpie restart the Codex app's
 // app-server for a change it makes by itself (Provider.RestartApp). While
 // providers.json can't be read it is unknown, and the app is left be: a

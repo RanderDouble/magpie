@@ -58,7 +58,7 @@ func CodexMayBeUsedUp(user string) {
 	}
 	active := ""
 	for _, l := range Logins("codex") {
-		if l.Active && strings.EqualFold(l.User, user) {
+		if (l.Active || l.first) && strings.EqualFold(l.User, user) {
 			active = l.User
 		}
 	}
@@ -91,7 +91,7 @@ func CodexServesWhileOut(model string) bool {
 		return true
 	}
 	for _, l := range Logins("codex") {
-		if !l.Active && l.Lapsed == "" && !codexHeldKnown(l.User) {
+		if !l.Active && !l.first && l.Lapsed == "" && !codexHeldKnown(l.User) {
 			return true
 		}
 	}

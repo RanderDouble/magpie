@@ -488,6 +488,12 @@ func TestCodexKeychainRetry(t *testing.T) {
 	if _, ok := codexAccount(home); ok {
 		t.Fatal("read though refused")
 	}
+	// a store magpie can't read is unknown: no saved account stands in
+	for _, l := range Logins("codex") {
+		if l.first {
+			t.Fatalf("refused, yet %s stands in", l.User)
+		}
+	}
 	x := codexExclusion(t)
 	if x == nil || !x.Retry || !strings.Contains(x.Why, "denied or cancelled") || !strings.Contains(x.Why, `"Always Allow"`) {
 		t.Fatalf("refused: %+v", x)
@@ -514,7 +520,8 @@ func TestCodexKeychainRetry(t *testing.T) {
 	if x := codexExclusion(t); x == nil || !x.Retry || !strings.Contains(x.Why, "no answer in time") {
 		t.Fatalf("no answer: %+v", x)
 	}
-	// no item: signed out, nothing to try again
+	// no item: signed out, nothing to try again; the saved account stands
+	// in, so Codex is still listed (codexStandIn)
 	k.findErr = nil
 	k.mu.Lock()
 	clear(k.items)
@@ -522,8 +529,11 @@ func TestCodexKeychainRetry(t *testing.T) {
 	if err := RetryCodexKeychain(); err == nil || !strings.Contains(err.Error(), "no Codex sign-in") {
 		t.Fatalf("Try again, no item: %v", err)
 	}
-	if x := codexExclusion(t); x == nil || x.Retry {
-		t.Fatalf("no item: %+v", x)
+	if _, ok := codexAccount(home); !ok {
+		t.Fatal("nothing signed in, and no stand-in")
+	}
+	if x := codexExclusion(t); x != nil {
+		t.Fatalf("a saved account stands in, yet: %+v", x)
 	}
 }
 

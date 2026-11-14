@@ -8,6 +8,7 @@ package provider
 // has exactly one holder.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -149,6 +150,8 @@ func (p Provider) alsoOn() []Provider {
 	if p.Account == nil || p.Account.token != nil && !p.Account.standIn || (p.Account.Agent != "claude" && p.Account.Agent != "codex") {
 		return nil
 	}
+	// a signed-in agent's ticked accounts, and the same for the account
+	// standing in for a signed-out Codex's own: it is what l.first names
 	var out []Provider
 	for _, l := range Logins(p.Account.Agent) {
 		if l.Active || l.first || !l.On {
@@ -300,6 +303,33 @@ func renewSaved(ctx context.Context, agent, user string, force bool, stale strin
 			reason = forcedReason(ctx)
 		}
 		if tok, err = codexRefresh(ctx, raw, reason); err != nil {
+			// Codex, or another copy of the sign-in, refreshed it first: the
+			// copy here holds the spent token, while a Codex folder is signed
+			// in to the same login with the one the family went on with.
+			// Renewed there, as heldByCodex does, and the copy takes that
+			// sign-in with its folder, so the next refresh goes there too
+			// instead of spending it here.
+			if home := codexAdopted(*l); home != "" {
+				t, id, aerr := codexTokenRenewing(ctx, home, "")
+				var sb []byte
+				if aerr == nil {
+					sb, _, aerr = readCodexLogin(home, true)
+				}
+				if aerr != nil {
+					return "", "", savedRefreshFailed(agent, user, err)
+				}
+				loginsMu.Lock()
+				defer loginsMu.Unlock()
+				ls := readLogins()
+				for i := range ls {
+					if ls[i].Agent == agent && strings.EqualFold(ls[i].User, user) {
+						ls[i].Auth, ls[i].Home = json.RawMessage(bytes.TrimSpace(sb)), home
+						ls[i].Renewed = time.Now().UTC().Truncate(time.Second)
+						ls[i].Lapsed = ""
+					}
+				}
+				return t, codexOwnWorkspace(*l, id), writeLogins(ls)
+			}
 			return "", "", savedRefreshFailed(agent, user, err)
 		}
 		if auth, err = json.MarshalIndent(raw, "", "  "); err != nil {
@@ -362,13 +392,20 @@ func (e codexHeldRefusal) Unwrap() error { return e.error }
 // savedRefreshFailed words a saved account's failed refresh. One the vendor
 // refused is marked lapsed on the account: that sign-in is gone and has to be
 // made again, in magpie; the agent's own login command would sign the agent
-// in, not this account. A refresh that never got an answer marks nothing.
+// in, not this account. A refusal that says the token was spent elsewhere
+// (refresh_token_reused) says so, that being what happened: another copy of
+// the sign-in refreshed it first. A refresh that never got an answer marks
+// nothing.
 func savedRefreshFailed(agent, user string, err error) error {
 	var refused refreshRefused
 	if !errors.As(err, &refused) {
 		return fmt.Errorf("%s: %w", user, err)
 	}
 	msg := user + "'s sign-in has expired — add the account again to use it"
+	var coded codexRefreshRefusal
+	if errors.As(err, &coded) && strings.EqualFold(coded.Code, "refresh_token_reused") {
+		msg = user + "'s sign-in was refreshed elsewhere first — add the account again to use it"
+	}
 	loginsMu.Lock()
 	defer loginsMu.Unlock()
 	ls := readLogins()

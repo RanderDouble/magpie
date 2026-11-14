@@ -458,7 +458,7 @@ func codexPoolModels(ms []catalog.Model) []catalog.Model { return poolModels("co
 func poolModels(agent string, ms []catalog.Model) []catalog.Model {
 	var lists [][]catalog.Model
 	for _, l := range Logins(agent) {
-		if l.Active || !l.On {
+		if l.Active || l.first || !l.On {
 			continue
 		}
 		if live, _, ok := catalog.Live(accountModels(agent, l.User)); ok {
@@ -552,7 +552,7 @@ func codexFetchSaved(ctx context.Context) {
 	ls := Logins("codex")
 	codexSavedAsked.Lock()
 	for _, l := range ls {
-		if l.Active || !l.On {
+		if l.Active || l.first || !l.On {
 			continue
 		}
 		key := accountModels("codex", l.User)

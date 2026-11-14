@@ -201,6 +201,12 @@ type Provider struct {
 	// used-up account (a switch off it, becoming its provider for it)
 	// restart it either way: the app greys Send there (8b0132b3d).
 	RestartApp bool `json:"restartApp,omitempty"`
+	// NoSavedStandIn, on Codex's subscription, keeps a saved ChatGPT
+	// account from standing in while Codex is signed out of a ChatGPT
+	// sign-in: Codex is then listed only while it is signed in itself
+	// (codexStandIn). Off, one stands in, as a saved Claude account does
+	// while Claude Code is signed out (claudeStandIn).
+	NoSavedStandIn bool `json:"noSavedStandIn,omitempty"`
 	// KeepSelf, on a Remote magpie that turned out to be this magpie
 	// (SelfAnswered), keeps it in routing anyway: left alone, such a
 	// provider is left out (SelfLeftOut). It is this computer's own, as
@@ -1115,6 +1121,7 @@ func accountSettings(a, pk Provider) Provider {
 	a.PickedFrom, a.Delisted, a.DelistedAt = pk.PickedFrom, pk.Delisted, pk.DelistedAt
 	a.Models, a.Unlisted, a.Off, a.Fallback, a.Routing, a.Affinity, a.KeepLogin, a.KeepLoginAs, a.Contexts, a.Family = pk.Models, pk.Unlisted, pk.Off, pk.Fallback, pk.Routing, pk.Affinity, pk.KeepLogin, pk.KeepLoginAs, pk.Contexts, pk.Family
 	a.SwitchOnly, a.RestartApp = pk.SwitchOnly, pk.RestartApp
+	a.NoSavedStandIn = pk.NoSavedStandIn
 	a.Sink, a.NoModels, a.BestInFamily = pk.Sink, pk.NoModels, pk.BestInFamily
 	a.NativeCompaction = pk.NativeCompaction
 	a.PromptAsWritten = pk.PromptAsWritten

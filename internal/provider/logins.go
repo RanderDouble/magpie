@@ -70,6 +70,10 @@ type Login struct {
 	// (codex_access_only.go): magpie never renews its sign-in, nor signs
 	// Codex in to it.
 	AccessOnly bool `json:"accessOnly,omitempty"`
+	// StandIn is the saved account served in the place of the agent's own
+	// while the agent is signed out here (claudeStandIn, codexStandIn): it
+	// is the account the provider is listed on, and listed as signed in.
+	StandIn bool `json:"standIn,omitempty"`
 
 	// first is the saved Claude account served in the place of Claude
 	// Code's own while it is signed out (claudeStandIn).
@@ -796,15 +800,19 @@ func claudeSignedInUser(plan, statusPlan, status string) (user string, acct map[
 func savedButSignedOut() []Exclusion {
 	saved := map[string]int{}
 	users := map[string][]string{}
-	for _, l := range readLogins() {
+	all := readLogins()
+	for _, l := range all {
 		saved[l.Agent]++
 		users[l.Agent] = append(users[l.Agent], l.User)
 	}
 	var out []Exclusion
 	for _, a := range loginAgents {
 		// Claude Code signed out, its saved accounts are served all the
-		// same (claudeStandIn)
-		if saved[a] == 0 || a == "claude" {
+		// same (claudeStandIn); Codex signed out, one of them stands in
+		// (codexStandIn)
+		// a Codex sign-in magpie couldn't read is unknown, not signed out,
+		// and no saved account stands in for one it may be holding
+		if saved[a] == 0 || a == "claude" || a == "codex" && codexStandIn(all) != "" && codexSignedOut(codexHome()) {
 			continue
 		}
 		if _, ok := liveLogin(a); ok {
@@ -985,6 +993,43 @@ func codexHeldIn(l savedLogin) string {
 	}
 	if sameLogin(in, l) || sameRefresh(in.Auth, l.Auth) {
 		return l.Home
+	}
+	return ""
+}
+
+// codexAdopted is the Codex folder signed in to the same login as the
+// saved account l, with a sign-in magpie's copy of it doesn't hold: l's
+// refresh token was spent elsewhere already, and this folder has the one
+// the family went on with. The login is the email, whatever workspace
+// auth.json routes to: one sign-in, one refresh token for all of them
+// (codexWorkspacesApart). A folder's sign-in the user removed from magpie
+// is passed over, as codexHomeLogins passes it over; with that record
+// unreadable none of the other folders is read. "" when there is none.
+func codexAdopted(l savedLogin) string {
+	if l.Agent != "codex" {
+		return ""
+	}
+	want, _ := codexWho(l.Auth)
+	if want == "" {
+		return ""
+	}
+	newer := func(in savedLogin) bool {
+		got, _ := codexWho(in.Auth)
+		return got != "" && strings.EqualFold(got, want) && !sameRefresh(in.Auth, l.Auth)
+	}
+	if live, ok := liveLogin("codex"); ok && newer(live) {
+		return codexHome()
+	}
+	aside, err := readCodexAside()
+	if err != nil {
+		return ""
+	}
+	for _, home := range codexOtherHomes() {
+		in, ok := codexLoginIn(home)
+		if !ok || !newer(in) || codexSetAside(in, aside) {
+			continue
+		}
+		return home
 	}
 	return ""
 }
@@ -1237,6 +1282,15 @@ func loginsNow(agent string) []Login {
 		// signed-out one too, which the row then says is signed out
 		standIn = claudeListed(ls)
 	}
+	codexFirst := ""
+	if agent == "codex" || agent == "" {
+		if _, ok := active["codex"]; !ok && codexSignedOut(codexHome()) {
+			// the one Codex is listed on while nothing is signed in in
+			// ~/.codex (codexStandInAccount); a store magpie can't read is
+			// unknown, and stands in for nothing
+			codexFirst = codexStandIn(ls)
+		}
+	}
 	back := map[string]string{}
 	for a, user := range active {
 		// only where magpie goes back to it (returnsToFirst): a return
@@ -1250,8 +1304,9 @@ func loginsNow(agent string) []Login {
 			continue
 		}
 		using := strings.EqualFold(active[l.Agent], l.User)
-		first := l.Agent == "claude" && strings.EqualFold(standIn, l.User)
-		lg := Login{Agent: l.Agent, User: l.User, Plan: l.Plan, Seen: l.Seen, Active: using, On: using || first || l.On,
+		first := l.Agent == "claude" && strings.EqualFold(standIn, l.User) ||
+			l.Agent == "codex" && strings.EqualFold(codexFirst, l.User)
+		lg := Login{Agent: l.Agent, User: l.User, Plan: l.Plan, Seen: l.Seen, Active: using, On: using || first || l.On, StandIn: l.Agent == "codex" && first,
 			Paused: (using || first) && pausedOwn(ls, l.Agent, l.User), first: first}
 		if !using && l.Agent == "codex" {
 			lg.home = l.Home
@@ -1438,8 +1493,18 @@ func switchLoginBy(agent, user string, byMagpie bool) error {
 		return switchGoogleLogin(agent, user)
 	}
 	from, err := switchSavedLogin(agent, user)
-	if err == nil && agent == "codex" && from != "" {
-		noteCodexSwitchBy(from, user, byMagpie)
+	if err == nil && agent == "codex" {
+		switch {
+		case from != "":
+			noteCodexSwitchBy(from, user, byMagpie)
+		default:
+			// nothing signed in here before the switch: the app-server is
+			// on whatever account it started with, and is restarted to
+			// follow. Signed in already, the switch changed nothing.
+			if _, ok := liveLogin(agent); !ok {
+				codexAppSwitched(false, byMagpie)
+			}
+		}
 	}
 	if err == nil && agent == "claude" {
 		// the account's own way out goes with it (#1807)
